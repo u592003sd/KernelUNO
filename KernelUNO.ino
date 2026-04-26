@@ -1,60 +1,292 @@
+/*
+  BSD 3-Clause License
+
+  Copyright (c) 2026, Arc1011
+
+  Redistribution and use in source and binary forms, with or without
+  modification, are permitted provided that the following conditions are met:
+
+  1. Redistributions of source code must retain the above copyright notice, this
+    list of conditions and the following disclaimer.
+
+  2. Redistributions in binary form must reproduce the above copyright notice,
+    this list of conditions and the following disclaimer in the documentation
+    and/or other materials provided with the distribution.
+
+  3. Neither the name of the copyright holder nor the names of its
+    contributors may be used to endorse or promote products derived from
+    this software without specific prior written permission.
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+  FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+  DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+  OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+  Project: KernelUNO
+
+  A lightweight RAM-based shell for Arduino UNO with filesystem simulation,
+  hardware control, and interactive shell.
+
+  created by Arc1011
+  Link to Original Project: https://github.com/Arc1011/KernelUNO
+
+  modified 26 April 2026
+  By u592003sd
+
+  This project is in the public domain.
+  Link to Repository Fork: https://github.com/u592003sd/KernelUNO
+*/
+
+/******************************************************************************/
+/*                          Include Headers                                   */
+/******************************************************************************/
+
+/* Standard Includes */
 #include <Arduino.h>
 #include <string.h>
 
-#define MAX_FILES 10         
-#define NAME_LEN 12         
-#define CONTENT_LEN 32      
-#define PATH_LEN 16         
-#define DMESG_LINES 6
-#define DMESG_LEN 40
+/******************************************************************************/
+/*                          Private Macros                                    */
+/******************************************************************************/
+/* Maximum number of files permitted in FS */
+#define MAX_FILES                   (10)
 
-typedef struct {
-  char name[NAME_LEN];
-  char content[CONTENT_LEN];
-  char parentDir[PATH_LEN];
-  int isDirectory;
-  int active;
+/* Maximum length of the name of an FS Object */
+#define NAME_LEN                    (12)
+
+/* Maximum Size of Content that can be attached to a RAM File Object */
+#define CONTENT_LEN                 (32)
+
+/* Maximum Permitted length of Path by the FS */
+#define PATH_LEN                    (16)
+
+/* Maximum number of Dmesg Entries permitted in the FS */
+#define DMESG_LINES                 (6)
+
+/* Maximum size of the a Dmesg log on the serial console */
+#define DMESG_LEN                   (40)
+
+/******************************************************************************/
+/*                          Private Typedefs                                  */
+/******************************************************************************/
+
+/* Structure of a RAM File object in FS */
+typedef struct 
+{
+  char name[NAME_LEN];              /**< Name of the FS Object */
+  char content[CONTENT_LEN];        /**< Stores the content of the RAMFile */
+  char parentDir[PATH_LEN];         /**< Stores the Path Name of the Parent Dir */
+  int isDirectory;                  /**< Is the RAMFile Object a File or Folder */
+  int active;                       /**< Is the RAM file Active */
 } RAMFile;
 
+/* Structure used to store Kernel Dmesg to be logged on console */
 typedef struct {
-  unsigned long timestamp;
-  char message[DMESG_LEN];
+  unsigned long timestamp;          /**< Timestamp to be added on Dmesg log */
+  char message[DMESG_LEN];          /**< Message to be displayed on log */
 } DmesgEntry;
 
+/******************************************************************************/
+/*                     Private Variable Declarations                          */
+/******************************************************************************/
+
+/* Declare the file system object (a collection of RAMFile objects) */
 RAMFile fs[MAX_FILES];
+
+/* The FS begins at Root Directory */
 char currentPath[PATH_LEN] = "/";
+
+/* Declare an empty Input Buffer for interactive Prompt */
 char inputBuffer[32] = "";
+
+/* Define a variable to store input Length of the Prompt */
 int inputLen = 0;
+
+/* Declare a global structure to log Kernel Dmesgs*/
 DmesgEntry dmesg[DMESG_LINES];
+
+/* Define a variable to keep track of number of Dmesgs passed */
 int dmesgIndex = 0;
 
-int freeMemory() {
-  extern int __heap_start, *__brkval;
+/******************************************************************************/
+/*                   Private Functions Prototype                              */
+/******************************************************************************/
+
+/* Function to report the amount of free SRAM available */
+int freeMemory(void);
+
+/* Function Defined to reboot the system by transfering system control to 
+ * the reset vector located at address 0x0 */
+void(* resetFunc) (void) = 0;
+
+/* Function to add an entry to the FS dmesg log */
+void addDmesg(const char* msg);
+
+/* Function to initialize the fs object */
+void initFS(void);
+
+/* Adds the command line prompt text on the serial console for 
+ * user interaction */
+void printPrompt(void);
+
+/* Function which inteprets the content of a RAM File object 
+ * and runs commands on Kernel CLI accordingly */
+void runScript(const char* content);
+
+/* Returns the index at which the substr occurs in the str 
+ * Returns -1 if substr is not found in str */
+int indexOf(const char* str, const char* substr);
+
+/* Convert a numeric string into an integer */
+int atoi_safe(const char* str);
+
+/* Converts the all the letters to lowercase for command interpretation */
+void toLowercase(char* str);
+
+/* Function to concatenate two paths and store in 1 variable 
+ * Returns [0] on Success 
+ * Returns [1] on String Length too long */
+int safeConcatPath(char* dest, const char* add);
+
+/* The Ultimate SwitchCase to interpret the command provided on the CLI/Script */
+void executeCommand(char* line);
+
+/******************************************************************************/
+/*                           Public Functions                                 */
+/******************************************************************************/
+
+/* -------------------------------------------------------------------------- */
+/*                            Setup Function                                  */
+/* -------------------------------------------------------------------------- */
+
+void setup() 
+{
+  /* Begin UART communication */
+  Serial.begin(115200);
+  
+  /* Initialize the FS*/
+  initFS(); 
+  
+  /* TODO: Modify to 100ms and see if there is behavioural change */
+  delay(1000);
+  
+  /* Indicate the completion of initialization */
+  Serial.println(F("\n--- KernelUNO v1.0 ---"));
+  Serial.println(F("Type 'help' for commands"));
+  
+  /* Show the command prompt to accept user input */
+  printPrompt();
+}
+
+/* -------------------------------------------------------------------------- */
+/*                            Loop Function                                   */
+/* -------------------------------------------------------------------------- */
+
+void loop() {
+  /* Check if the user has provided any input on the interactive prompt */
+  if (Serial.available() > 0) 
+  {
+    /* Pick up the available character */
+    char c = Serial.read();
+    
+    if (c == '\r' || c == '\n') 
+    {
+      /* if the user presses an 'ENTER' key to validate the command */
+      if (inputLen > 0) 
+      {
+        inputBuffer[inputLen] = '\0';
+        Serial.println();
+        
+        /* Execute the complete command in the inputBuffer */
+        executeCommand(inputBuffer);
+
+        /* reset the inputBuffer */
+        inputLen = 0;
+        memset(inputBuffer, 0, 32);
+
+        /* Show the user the interactive command prompt once again */
+        printPrompt();
+      }
+    } 
+    else if (c == 8 || c == 127) 
+    {
+      /* if the user presses a 'backspace' or a 'delete' key */
+      if (inputLen > 0) 
+      {
+        inputLen--;
+        inputBuffer[inputLen] = '\0';
+        Serial.print(F("\b \b")); 
+      }
+    } 
+    else if (inputLen < 31) 
+    {
+      /* Load the character from the command line into the input buffer */
+      Serial.print(c);
+      inputBuffer[inputLen] = c;
+      inputLen++;
+    }
+  }
+}
+
+/******************************************************************************/
+/*                          Private Functions                                 */
+/******************************************************************************/
+
+int freeMemory() 
+{
+  /* memory pointer that marks the boundary between heap and stack */
+  extern int *__brkval;
+  /* Contains the address to the start of heap */
+  extern int __heap_start; 
   int v;
+  
   return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval);
 }
 
-void(* resetFunc) (void) = 0;
-
-void addDmesg(const char* msg) {
+void addDmesg(const char* msg) 
+{
+  /* Add Check to see if we have reached the maximum number of Dmesg logs */
   if (dmesgIndex >= DMESG_LINES) dmesgIndex = 0;
+
+  /* Log the dmesg Object */
   dmesg[dmesgIndex].timestamp = millis() / 1000;
   strncpy(dmesg[dmesgIndex].message, msg, DMESG_LEN - 1);
   dmesg[dmesgIndex].message[DMESG_LEN - 1] = '\0';
+
+  /* Increment the Dmesg Index */
   dmesgIndex++;
 }
 
-void initFS() {
+void initFS() 
+{
+  /* Define local variables */
   const char* dirs[] = {"home", "dev"};
   int d, i;
   
-  for (d = 0; d < 2; d++) {
-    for (i = 0; i < MAX_FILES; i++) {
-      if (!fs[i].active) {
+  /* Iterate over directories in FS */
+  for (d = 0; d < 2; d++) 
+  {
+    /* Iterate over RAM File Objects in the Directory */
+    for (i = 0; i < MAX_FILES; i++) 
+    {
+      /* For every inactive RAM File Object */
+      if (!fs[i].active) 
+      {
+        /* Initialize the FS Object Name field */
         strncpy(fs[i].name, dirs[d], NAME_LEN - 1);
         fs[i].name[NAME_LEN - 1] = '\0';
+        
+        /* Initialize the FS Object Parent Directory field */
         strncpy(fs[i].parentDir, "/", PATH_LEN - 1);
         fs[i].parentDir[PATH_LEN - 1] = '\0';
+        
+        /* Define the FS Object as active directories in the FS */
         fs[i].isDirectory = 1;
         fs[i].active = 1;
         break;
@@ -64,13 +296,22 @@ void initFS() {
   
   char devPath[PATH_LEN] = "/dev/";
   const char* pins[] = {"pin2", "pin3", "pin4"};
-  for (d = 0; d < 3; d++) {
-    for (i = 0; i < MAX_FILES; i++) {
-      if (!fs[i].active) {
+  
+  for (d = 0; d < 3; d++) 
+  {
+    for (i = 0; i < MAX_FILES; i++) 
+    {
+      if (!fs[i].active) 
+      {
+        /* Initialize the FS Object Name field */
         strncpy(fs[i].name, pins[d], NAME_LEN - 1);
         fs[i].name[NAME_LEN - 1] = '\0';
+        
+        /* Initialize the FS Object Parent Directory field */
         strncpy(fs[i].parentDir, devPath, PATH_LEN - 1);
         fs[i].parentDir[PATH_LEN - 1] = '\0';
+        
+        /* Define the FS Object as active files in the FS */
         fs[i].isDirectory = 0;
         fs[i].content[0] = '\0';
         fs[i].active = 1;
@@ -84,98 +325,127 @@ void initFS() {
   addDmesg("Ready for commands");
 }
 
-void setup() {
-  Serial.begin(115200);
-  initFS(); 
-  delay(1000);
-  Serial.println(F("\n--- KernelUNO v1.0 ---"));
-  Serial.println(F("Type 'help' for commands"));
-  printPrompt();
-}
-
-void printPrompt() {
+void printPrompt() 
+{
   Serial.print(F("root@arduino:"));
   Serial.print(currentPath);
   Serial.print(F("# "));
 }
 
-void loop() {
-  if (Serial.available() > 0) {
-    char c = Serial.read();
-    if (c == '\r' || c == '\n') {
-      if (inputLen > 0) {
-        inputBuffer[inputLen] = '\0';
-        Serial.println();
-        executeCommand(inputBuffer);
-        inputLen = 0;
-        memset(inputBuffer, 0, 32);
-        printPrompt();
+void runScript(const char* content) 
+{
+  /* Define local Variables */
+  char line[CONTENT_LEN];
+  int ci = 0, li = 0, lineNum = 0;
+  int len = strlen(content);
+
+  while (ci <= len) 
+  {
+    /* add ';' at the end of command */
+    char c = (ci < len) ? content[ci] : ';';
+    ci++;
+
+    /* Check if the context index has reached the end of a singular command*/
+    if (c == ';' || c == '\n' || c == '\r') 
+    {
+      if (li > 0) 
+      {
+        line[li] = '\0';
+        lineNum++;
+        Serial.print(F("[sh:")); Serial.print(lineNum); Serial.print(F("] "));
+        Serial.println(line);
+        
+        /* Execute the formed command and reset the line index to 
+         * read the following script */
+        executeCommand(line);
+        li = 0;
       }
-    } 
-    else if (c == 8 || c == 127) {
-      if (inputLen > 0) {
-        inputLen--;
-        inputBuffer[inputLen] = '\0';
-        Serial.print(F("\b \b")); 
-      }
-    } 
-    else if (inputLen < 31) {
-      Serial.print(c);
-      inputBuffer[inputLen] = c;
-      inputLen++;
+    } else 
+    {
+      if (li < (CONTENT_LEN - 1)) line[li++] = c;
     }
   }
+
+  /* Add logs to indicate Script Excution Completion */
+  addDmesg("sh: script done");
+  Serial.println(F("[sh] done."));
 }
 
-int indexOf(const char* str, const char* substr) {
+int indexOf(const char* str, const char* substr) 
+{
   int i, j, slen = strlen(str), sublen = strlen(substr);
-  for (i = 0; i <= slen - sublen; i++) {
+  for (i = 0; i <= slen - sublen; i++) 
+  {
+    /* Assume match is found */
     int match = 1;
-    for (j = 0; j < sublen; j++) {
-      if (str[i + j] != substr[j]) {
+    for (j = 0; j < sublen; j++) 
+    {
+      if (str[i + j] != substr[j]) 
+      {
+        /* if the comparision diverges anywhere, reset the match variable */
         match = 0;
         break;
       }
     }
+
+    /* If a match is found, return the start index of 
+     * the sub string in the complete string */
     if (match) return i;
   }
   return -1;
 }
 
-int atoi_safe(const char* str) {
+int atoi_safe(const char* str) 
+{
   int num = 0;
-  while (*str >= '0' && *str <= '9') {
+  
+  while (*str >= '0' && *str <= '9') 
+  {
     num = num * 10 + (*str - '0');
     str++;
   }
+
   return num;
 }
 
-void toLowercase(char* str) {
+void toLowercase(char* str) 
+{
   int i;
-  for (i = 0; str[i] != '\0'; i++) {
-    if (str[i] >= 'A' && str[i] <= 'Z') {
+  for (i = 0; str[i] != '\0'; i++) 
+  {
+    /* If the current character is an uppercase letter */
+    if (str[i] >= 'A' && str[i] <= 'Z') 
+    {
+      /* Convert it to lowercase */
       str[i] = str[i] - 'A' + 'a';
     }
   }
 }
 
-int safeConcatPath(char* dest, const char* add) {
+int safeConcatPath(char* dest, const char* add) 
+{
+  /* Define Local Variables */
+  int retVal = 0;
   int destLen = strlen(dest);
   int addLen = strlen(add);
   
-  if (destLen + addLen + 2 >= PATH_LEN) {  // +2 dla "/" i "\0"
-    return 0;
+  /* Check whether it is possible to concatenate the 2 strings */
+  if (destLen + addLen + 2 >= PATH_LEN) 
+  {
+    /* Return Error Code 1: Path too long */  
+    retVal = 1;
+  } else 
+  {
+    /* Perform intended path concatenation */
+    strncat(dest, add, PATH_LEN - destLen - 1);
+    strncat(dest, "/", PATH_LEN - destLen - 1);
   }
   
-  strncat(dest, add, PATH_LEN - destLen - 1);
-  strncat(dest, "/", PATH_LEN - strlen(dest) - 1);
-  return 1;
-}
+  return retVal;
+} 
 
-void runScript(const char* content); 
-
-void executeCommand(char* line) {
+void executeCommand(char* line) 
+{
   char cmd[32] = "";
   char args[32] = "";
   int space1 = -1;
@@ -336,7 +606,9 @@ void executeCommand(char* line) {
       int j, found = 0;
       for (j = 0; j < MAX_FILES; j++) {
         if (fs[j].active && fs[j].isDirectory && strcmp(args, fs[j].name) == 0 && strcmp(fs[j].parentDir, currentPath) == 0) {
-          if (!safeConcatPath(currentPath, fs[j].name)) {
+          /* safeConcatPath Doesn't return 0, the Path was too long to be formed */
+          if (safeConcatPath(currentPath, fs[j].name)) 
+          {
             strncpy(currentPath, "/", PATH_LEN - 1);
             currentPath[PATH_LEN - 1] = '\0';
             Serial.println(F("Path too long."));
@@ -517,32 +789,4 @@ void executeCommand(char* line) {
   else {
     Serial.println(F("Unknown command."));
   }
-}
-
-// Interpreter sh
-
-void runScript(const char* content) {
-  char line[32];
-  int ci = 0, li = 0, lineNum = 0;
-  int len = strlen(content);
-
-  while (ci <= len) {
-    char c = (ci < len) ? content[ci] : ';';
-    ci++;
-
-    if (c == ';' || c == '\n' || c == '\r') {
-      if (li > 0) {
-        line[li] = '\0';
-        lineNum++;
-        Serial.print(F("[sh:")); Serial.print(lineNum); Serial.print(F("] "));
-        Serial.println(line);
-        executeCommand(line);
-        li = 0;
-      }
-    } else {
-      if (li < 31) line[li++] = c;
-    }
-  }
-  addDmesg("sh: script done");
-  Serial.println(F("[sh] done."));
 }
