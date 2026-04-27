@@ -72,6 +72,9 @@
 /* Maximum size of the a Dmesg log on the serial console */
 #define DMESG_LEN                   (40)
 
+/* Number of PWM Pins on Arduino UNO */
+#define NUM_PWM_PINS                (6)
+
 /******************************************************************************/
 /*                          Private Typedefs                                  */
 /******************************************************************************/
@@ -114,6 +117,9 @@ DmesgEntry dmesg[DMESG_LINES];
 /* Define a variable to keep track of number of Dmesgs passed */
 int dmesgIndex = 0;
 
+/* Define an array which contains all PWM supported pins on Arduino UNO */
+int pinsPwm[NUM_PWM_PINS] = {3, 5, 6, 9, 10, 11};
+
 /******************************************************************************/
 /*                   Private Functions Prototype                              */
 /******************************************************************************/
@@ -143,11 +149,16 @@ void runScript(const char* content);
  * Returns -1 if substr is not found in str */
 int indexOf(const char* str, const char* substr);
 
-/* Convert a numeric string into an integer */
+/* Convert a numeric string into an integer
+ * Doesn't do anything for non-numerical characters */
 int atoi_safe(const char* str);
 
 /* Converts the all the letters to lowercase for command interpretation */
 void toLowercase(char* str);
+
+/* Finds 'key' in an integer array 'intArr' 
+ * Returns the array index of the key if found, else -1 */
+int intFind(int key, int *intArr, int size);
 
 /* Function to concatenate two paths and store in 1 variable 
  * Returns [0] on Success 
@@ -289,6 +300,8 @@ void initFS()
         /* Define the FS Object as active directories in the FS */
         fs[i].isDirectory = 1;
         fs[i].active = 1;
+
+        /* Break the inactive FS search for loop */
         break;
       }
     }
@@ -315,6 +328,8 @@ void initFS()
         fs[i].isDirectory = 0;
         fs[i].content[0] = '\0';
         fs[i].active = 1;
+
+        /* Break the inactive FS search for loop */
         break;
       }
     }
@@ -422,6 +437,25 @@ void toLowercase(char* str)
   }
 }
 
+int intFind(int key, int *intArr, int size)
+{
+  /* Define local variables*/
+  int retVal = -1;
+  int i;
+
+  /* search for key in intArr */
+  for (i = 0; i < size; i++) 
+  {
+    if (intArr[i] == key) 
+    {
+      retVal = i;
+      break;
+    }
+  }
+
+  return retVal;
+}
+
 int safeConcatPath(char* dest, const char* add) 
 {
   /* Define Local Variables */
@@ -446,72 +480,148 @@ int safeConcatPath(char* dest, const char* add)
 
 void executeCommand(char* line) 
 {
+  /* Define Local variables */
   char cmd[32] = "";
   char args[32] = "";
   int space1 = -1;
   int i, sp, pin, count;
   char buf[40];
   
+  /* Load the CLI command to be interpreted */
   strncpy(cmd, line, 31);
   cmd[31] = '\0';
   
-  for (i = 0; cmd[i] != '\0'; i++) {
-    if (cmd[i] == ' ') {
+  for (i = 0; cmd[i] != '\0'; i++) 
+  {
+    if (cmd[i] == ' ') 
+    { 
+      /* Once we detect a space, the following characters
+       * belong to the arguements */
       space1 = i;
+      
+      /* copy the remainder of the string to 'args' */
       strncpy(args, cmd + i + 1, 31);
       args[31] = '\0';
       cmd[i] = '\0';
+      
+      /* break the loop once you have a command */
       break;
     }
   }
   
+  /* for comparision with existing commands, remove case sensitivity */
   toLowercase(cmd);
   
-  if (strcmp(cmd, "pinmode") == 0) {
+  /* TODO: You can implement this logic with switch case 
+   * creation of jump table migh be efficient for program size */
+  if (strcmp(cmd, "pinmode") == 0) 
+  {
     sp = indexOf(args, " ");
-    if (sp == -1) { Serial.println(F("Usage: pinmode [pin] [in/out]")); return; }
+    if (sp == -1) 
+    { 
+      Serial.println(F("Usage: pinmode [pin] [in/out]")); 
+      return; 
+    }
+    
+    /* capture the pin arguement from the CLI */
     pin = atoi_safe(args);
+    
+    /* Capture the 'mode' arguement from the CLI */
     char mode[8] = "";
     strncpy(mode, args + sp + 1, 7);
     mode[7] = '\0';
     toLowercase(mode);
+    
+    /* Process the Mode arguement */
     if (strcmp(mode, "out") == 0) { 
       pinMode(pin, OUTPUT); 
       snprintf(buf, sizeof(buf), "Pin %d set to OUTPUT", pin);
       addDmesg(buf);
       Serial.println(F("Pin set to OUTPUT")); 
     }
-    else if (strcmp(mode, "in") == 0) { 
+    else if (strcmp(mode, "in") == 0) 
+    { 
       pinMode(pin, INPUT_PULLUP); 
       snprintf(buf, sizeof(buf), "Pin %d set to INPUT", pin);
       addDmesg(buf);
       Serial.println(F("Pin set to INPUT_PULLUP")); 
     }
+    else
+    {
+      /* mode passed was neither in not out */
+      snprintf(buf, sizeof(buf), "Unable to set Pin %d to IN/OUT", pin);
+      addDmesg(buf);
+      Serial.println(F("Incorrect Mode arguement passed, should be [in/out]"));
+    }
   }
-  else if (strcmp(cmd, "write") == 0) {
+  else if (strcmp(cmd, "write") == 0) 
+  {
     sp = indexOf(args, " ");
-    if (sp == -1) { Serial.println(F("Usage: write [pin] [high/low]")); return; }
+    if (sp == -1) 
+    { 
+      Serial.println(F("Usage: write [pin] [high/low]"));
+      
+      /* Support analogWrite functionality in Arduino */
+      Serial.println(F("OR Usage if (pins 3, 5, 6, 9, 10, 11) : write [pin] [0-255]")); 
+      return; 
+    }
+    
+    /* capture the pin arguement from the CLI */
     pin = atoi_safe(args);
+
+    /* capture the voltage level argument */
     char val[8] = "";
     strncpy(val, args + sp + 1, 7);
     val[7] = '\0';
     toLowercase(val);
-    digitalWrite(pin, (strcmp(val, "high") == 0 ? HIGH : LOW));
-    snprintf(buf, sizeof(buf), "Pin %d wrote %s", pin, strcmp(val, "high") == 0 ? "HIGH" : "LOW");
+    
+    if (strcmp(val, "high") == 0)
+    {
+    digitalWrite(pin, HIGH);
+    snprintf(buf, sizeof(buf), "Pin %d wrote %s", pin, "HIGH");
+    }
+    else if (strcmp(val, "low") == 0)
+    {
+    digitalWrite(pin, LOW);
+    snprintf(buf, sizeof(buf), "Pin %d wrote %s", pin, "LOW");      
+    }
+    else if (intFind(pin, pinsPwm, NUM_PWM_PINS) != -1)
+    {
+      atoi_safe(val);
+      if ((val >= 0) && (val <= 255))
+      {
+        analogWrite(pin, val);
+        snprintf(buf, sizeof(buf), "Pin %d wrote %d", pin, val);
+      }
+    }
+    else
+    {
+      /* invalid arguments passed */
+      snprintf(buf, sizeof(buf), "Unable to set Pin %d to any voltage level", pin);
+      addDmesg(buf);
+      Serial.println(F("Incorrect arguments passed ")); 
+    }
+
+    /* Log Kernel Message and serial console */
     addDmesg(buf);
     Serial.println(F("Write OK."));
   }
-  else if (strcmp(cmd, "read") == 0) {
+  else if (strcmp(cmd, "read") == 0) 
+  {
     pin = atoi_safe(args);
     int value = digitalRead(pin);
+    
     Serial.print(F("Pin ")); Serial.print(pin);
     Serial.print(F(" value: ")); Serial.println(value);
+
     snprintf(buf, sizeof(buf), "Pin %d read: %d", pin, value);
     addDmesg(buf);
   }
-  else if (strcmp(cmd, "gpio") == 0) {
+  else if (strcmp(cmd, "gpio") == 0) 
+  {
     sp = indexOf(args, " ");
-    if (sp == -1) { 
+    if (sp == -1) 
+    { 
       Serial.println(F("Usage: gpio [pin] [on/off] OR gpio vixa [count]"));
       return; 
     }
@@ -523,15 +633,18 @@ void executeCommand(char* line)
     action[7] = '\0';
     toLowercase(action);
     
-    if (strcmp(pinStr, "vixa") == 0) {
+    if (strcmp(pinStr, "vixa") == 0) 
+    {
       count = atoi_safe(action);
       if (count <= 0) count = 10;
       addDmesg("LED disco mode activated");
       Serial.println(F("LED DISCO MODE!"));
       
       int cycle, p;
-      for (cycle = 0; cycle < count; cycle++) {
-        for (p = 2; p <= 13; p++) {
+      for (cycle = 0; cycle < count; cycle++) 
+      {
+        for (p = 2; p <= 13; p++) 
+        {
           pinMode(p, OUTPUT);
           digitalWrite(p, HIGH);
           delay(50);
@@ -540,23 +653,28 @@ void executeCommand(char* line)
       }
       Serial.println(F("Disco finished!"));
       addDmesg("Disco complete");
-    } else {
+    } 
+    else 
+    {
       pin = atoi_safe(pinStr);
-      if (strcmp(action, "on") == 0) {
+      if (strcmp(action, "on") == 0) 
+      {
         pinMode(pin, OUTPUT);
         digitalWrite(pin, HIGH);
         snprintf(buf, sizeof(buf), "GPIO %d ON", pin);
         addDmesg(buf);
         Serial.print(F("GPIO ")); Serial.print(pin); Serial.println(F(" ON"));
       }
-      else if (strcmp(action, "off") == 0) {
+      else if (strcmp(action, "off") == 0) 
+      {
         pinMode(pin, OUTPUT);
         digitalWrite(pin, LOW);
         snprintf(buf, sizeof(buf), "GPIO %d OFF", pin);
         addDmesg(buf);
         Serial.print(F("GPIO ")); Serial.print(pin); Serial.println(F(" OFF"));
       }
-      else if (strcmp(action, "toggle") == 0) {
+      else if (strcmp(action, "toggle") == 0) 
+      {
         pinMode(pin, OUTPUT);
         digitalWrite(pin, !digitalRead(pin));
         snprintf(buf, sizeof(buf), "GPIO %d toggled", pin);
@@ -565,10 +683,13 @@ void executeCommand(char* line)
       }
     }
   }
-  else if (strcmp(cmd, "ls") == 0) {
+  else if (strcmp(cmd, "ls") == 0) 
+  {
     int empty = 1, j;
-    for (j = 0; j < MAX_FILES; j++) {
-      if (fs[j].active && strcmp(fs[j].parentDir, currentPath) == 0) {
+    for (j = 0; j < MAX_FILES; j++) 
+    {
+      if (fs[j].active && strcmp(fs[j].parentDir, currentPath) == 0) 
+      {
         Serial.print(fs[j].name);
         if (fs[j].isDirectory) Serial.print(F("/"));
         Serial.print(F("  "));
@@ -578,12 +699,15 @@ void executeCommand(char* line)
     if (empty) Serial.print(F("(empty)"));
     Serial.println();
   }
-  else if (strcmp(cmd, "mkdir") == 0 || strcmp(cmd, "touch") == 0) {
+  else if (strcmp(cmd, "mkdir") == 0 || strcmp(cmd, "touch") == 0) 
+  {
     int foundSlot = -1, j;
-    for (j = 0; j < MAX_FILES; j++) { 
+    for (j = 0; j < MAX_FILES; j++) 
+    { 
       if (!fs[j].active) { foundSlot = j; break; } 
     }
-    if (foundSlot == -1) {
+    if (foundSlot == -1) 
+    {
       Serial.println(F("No space."));
       return;
     }
@@ -597,15 +721,20 @@ void executeCommand(char* line)
     fs[foundSlot].active = 1;
     Serial.println(F("OK."));
   }
-  else if (strcmp(cmd, "cd") == 0) {
-    if (strcmp(args, "..") == 0 || strcmp(args, "/") == 0) {
+  else if (strcmp(cmd, "cd") == 0) 
+  {
+    if (strcmp(args, "..") == 0 || strcmp(args, "/") == 0) 
+    {
       strncpy(currentPath, "/", PATH_LEN - 1);
       currentPath[PATH_LEN - 1] = '\0';
     }
-    else {
+    else 
+    {
       int j, found = 0;
-      for (j = 0; j < MAX_FILES; j++) {
-        if (fs[j].active && fs[j].isDirectory && strcmp(args, fs[j].name) == 0 && strcmp(fs[j].parentDir, currentPath) == 0) {
+      for (j = 0; j < MAX_FILES; j++) 
+      {
+        if (fs[j].active && fs[j].isDirectory && strcmp(args, fs[j].name) == 0 && strcmp(fs[j].parentDir, currentPath) == 0) 
+        {
           /* safeConcatPath Doesn't return 0, the Path was too long to be formed */
           if (safeConcatPath(currentPath, fs[j].name)) 
           {
@@ -621,12 +750,15 @@ void executeCommand(char* line)
       if (!found) Serial.println(F("No dir."));
     }
   }
-  else if (strcmp(cmd, "pwd") == 0) {
+  else if (strcmp(cmd, "pwd") == 0) 
+  {
     Serial.println(currentPath);
   }
-  else if (strcmp(cmd, "echo") == 0) {
+  else if (strcmp(cmd, "echo") == 0) 
+  {
     int arrow = indexOf(args, " > ");
-    if (arrow != -1) {
+    if (arrow != -1) 
+    {
       char text[40] = "";
       strncpy(text, args, arrow);
       text[arrow] = '\0';
@@ -635,15 +767,20 @@ void executeCommand(char* line)
       filename[NAME_LEN - 1] = '\0';
       
       int j, found = 0;
-      for (j = 0; j < MAX_FILES; j++) {
-        if (fs[j].active && !fs[j].isDirectory && strcmp(filename, fs[j].name) == 0 && strcmp(fs[j].parentDir, currentPath) == 0) {
+      for (j = 0; j < MAX_FILES; j++) 
+      {
+        if (fs[j].active && !fs[j].isDirectory && strcmp(filename, fs[j].name) == 0 && strcmp(fs[j].parentDir, currentPath) == 0) 
+        {
           strncpy(fs[j].content, text, CONTENT_LEN - 1);
           fs[j].content[CONTENT_LEN - 1] = '\0';
           Serial.println(F("Saved."));
-          // Jeśli plik jest w /dev/ i nazywa się pinX
-          if (strcmp(fs[j].parentDir, "/dev/") == 0 && strncmp(fs[j].name, "pin", 3) == 0) {
+          
+          /* If the file is in /dev/ and is called pin */
+          if (strcmp(fs[j].parentDir, "/dev/") == 0 && strncmp(fs[j].name, "pin", 3) == 0) 
+          {
             int devPin = atoi_safe(fs[j].name + 3);
-            if (devPin > 0) {
+            if (devPin > 0) 
+            {
               pinMode(devPin, OUTPUT);
               digitalWrite(devPin, (text[0] == '1') ? HIGH : LOW);
               snprintf(buf, sizeof(buf), "GPIO %d %s via echo", devPin, (text[0] == '1') ? "HIGH" : "LOW");
@@ -656,14 +793,18 @@ void executeCommand(char* line)
       }
       if (!found) Serial.println(F("File not found."));
     }
-    else {
+    else 
+    {
       Serial.println(args);
     }
   }
-  else if (strcmp(cmd, "cat") == 0) {
+  else if (strcmp(cmd, "cat") == 0) 
+  {
     int j, found = 0;
-    for (j = 0; j < MAX_FILES; j++) {
-      if (fs[j].active && !fs[j].isDirectory && strcmp(args, fs[j].name) == 0 && strcmp(fs[j].parentDir, currentPath) == 0) {
+    for (j = 0; j < MAX_FILES; j++) 
+    {
+      if (fs[j].active && !fs[j].isDirectory && strcmp(args, fs[j].name) == 0 && strcmp(fs[j].parentDir, currentPath) == 0) 
+      {
         Serial.println(fs[j].content);
         found = 1;
         break;
@@ -671,10 +812,13 @@ void executeCommand(char* line)
     }
     if (!found) Serial.println(F("File not found."));
   }
-  else if (strcmp(cmd, "info") == 0) {
+  else if (strcmp(cmd, "info") == 0) 
+  {
     int j, found = 0;
-    for (j = 0; j < MAX_FILES; j++) {
-      if (fs[j].active && strcmp(args, fs[j].name) == 0 && strcmp(fs[j].parentDir, currentPath) == 0) {
+    for (j = 0; j < MAX_FILES; j++) 
+    {
+      if (fs[j].active && strcmp(args, fs[j].name) == 0 && strcmp(fs[j].parentDir, currentPath) == 0) 
+      {
         Serial.print(F("Name: ")); Serial.println(fs[j].name);
         Serial.print(F("Type: ")); Serial.println(fs[j].isDirectory ? F("Directory") : F("File"));
         Serial.print(F("Size: ")); Serial.print(strlen(fs[j].content)); Serial.println(F(" bytes"));
@@ -684,24 +828,31 @@ void executeCommand(char* line)
     }
     if (!found) Serial.println(F("Not found."));
   }
-  else if (strcmp(cmd, "rm") == 0) {
+  else if (strcmp(cmd, "rm") == 0) 
+  {
     int j, found = 0;
-    for (j = 0; j < MAX_FILES; j++) {
-      if (fs[j].active && strcmp(args, fs[j].name) == 0 && strcmp(fs[j].parentDir, currentPath) == 0) {
-        if (fs[j].isDirectory) {
-          // Rekursywnie usuń wszystko wewnątrz katalogu
+    for (j = 0; j < MAX_FILES; j++) 
+    {
+      if (fs[j].active && strcmp(args, fs[j].name) == 0 && strcmp(fs[j].parentDir, currentPath) == 0) 
+      {
+        if (fs[j].isDirectory) 
+        {
+          /* Recursively delete everything inside the directory */
           char dirPath[PATH_LEN];
           strncpy(dirPath, currentPath, PATH_LEN - 1);
           dirPath[PATH_LEN - 1] = '\0';
           snprintf(dirPath, PATH_LEN, "%s%s/", currentPath, args);
           
           int k;
-          for (k = 0; k < MAX_FILES; k++) {
-            if (fs[k].active && strncmp(fs[k].parentDir, dirPath, strlen(dirPath)) == 0) {
+          for (k = 0; k < MAX_FILES; k++) 
+          {
+            if (fs[k].active && strncmp(fs[k].parentDir, dirPath, strlen(dirPath)) == 0) 
+            {
               fs[k].active = 0;
             }
           }
         }
+
         fs[j].active = 0;
         Serial.println(F("Removed."));
         found = 1;
@@ -710,11 +861,14 @@ void executeCommand(char* line)
     }
     if (!found) Serial.println(F("Not found."));
   }
-  else if (strcmp(cmd, "dmesg") == 0) {
+  else if (strcmp(cmd, "dmesg") == 0) 
+  {
     Serial.println(F("=== KERNEL MESSAGES ==="));
     int j;
-    for (j = 0; j < DMESG_LINES; j++) {
-      if (dmesg[j].message[0] != '\0') {
+    for (j = 0; j < DMESG_LINES; j++) 
+    {
+      if (dmesg[j].message[0] != '\0') 
+      {
         Serial.print(F("["));
         Serial.print(dmesg[j].timestamp);
         Serial.print(F("] "));
@@ -722,7 +876,8 @@ void executeCommand(char* line)
       }
     }
   }
-  else if (strcmp(cmd, "uptime") == 0) {
+  else if (strcmp(cmd, "uptime") == 0) 
+  {
     unsigned long s = millis()/1000;
     unsigned long h = s / 3600;
     unsigned long m = (s % 3600) / 60;
@@ -733,15 +888,18 @@ void executeCommand(char* line)
     Serial.print(sec); Serial.println(F("s"));
     addDmesg("uptime command");
   }
-  else if (strcmp(cmd, "df") == 0 || strcmp(cmd, "free") == 0) {
+  else if (strcmp(cmd, "df") == 0 || strcmp(cmd, "free") == 0) 
+  {
     Serial.print(F("Free RAM: "));
     Serial.print(freeMemory());
     Serial.println(F(" bytes"));
   }
-  else if (strcmp(cmd, "whoami") == 0) {
+  else if (strcmp(cmd, "whoami") == 0) 
+  {
     Serial.println(F("root"));
   }
-  else if (strcmp(cmd, "uname") == 0) {
+  else if (strcmp(cmd, "uname") == 0) 
+  {
     Serial.println(F("KernelUNO v1.0"));
     Serial.print(F("Kernel: Arduino "));
     Serial.println(F("AVR"));
@@ -751,26 +909,32 @@ void executeCommand(char* line)
     Serial.print(freeMemory());
     Serial.println(F(" bytes free"));
   }
-  else if (strcmp(cmd, "reboot") == 0) {
+  else if (strcmp(cmd, "reboot") == 0) 
+  {
     Serial.println(F("Rebooting..."));
     addDmesg("System reboot");
     delay(500);
     resetFunc();
   }
-  else if (strcmp(cmd, "clear") == 0) {
+  else if (strcmp(cmd, "clear") == 0) 
+  {
     int j;
     for(j = 0; j < 30; j++) Serial.println();
   }
-  else if (strcmp(cmd, "sh") == 0) {
-    if (args[0] == '\0') {
+  else if (strcmp(cmd, "sh") == 0) 
+  {
+    if (args[0] == '\0') 
+    {
       Serial.println(F("Usage: sh [script]"));
       return;
     }
     int j, found = 0;
-    for (j = 0; j < MAX_FILES; j++) {
+    for (j = 0; j < MAX_FILES; j++) 
+    {
       if (fs[j].active && !fs[j].isDirectory &&
           strcmp(args, fs[j].name) == 0 &&
-          strcmp(fs[j].parentDir, currentPath) == 0) {
+          strcmp(fs[j].parentDir, currentPath) == 0) 
+      {
         found = 1;
         addDmesg("sh: running script");
         runScript(fs[j].content);
@@ -779,14 +943,16 @@ void executeCommand(char* line)
     }
     if (!found) Serial.println(F("Script not found."));
   }
-  else if (strcmp(cmd, "help") == 0) {
+  else if (strcmp(cmd, "help") == 0) 
+  {
     Serial.println(F("Commands: ls, cd, pwd, mkdir, touch, cat, echo, rm, info"));
     Serial.println(F("          pinmode, write, read, gpio, sh"));
     Serial.println(F("          uptime, uname, dmesg, df, free, whoami, clear, reboot"));
     Serial.println(F("GPIO: gpio [pin] on/off/toggle  |  gpio vixa [count]"));
     Serial.println(F("SH:   sh [file]  -- run script (use ; as line separator)"));
   }
-  else {
+  else 
+  {
     Serial.println(F("Unknown command."));
   }
 }
