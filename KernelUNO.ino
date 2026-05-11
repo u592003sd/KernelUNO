@@ -608,8 +608,22 @@ void executeCommand(char* line)
   }
   else if (strcmp(cmd, "read") == 0) 
   {
-    pin = atoi_safe(args);
-    int value = digitalRead(pin);
+    toLowercase(args);
+    int value;
+    
+    if (args[0] == 'a')
+    {
+      /* if the first letter of the arguement is 'a', convert 
+       * the string to corresponding Pin Value in Arduino */
+      pin = 14 + atoi_safe(args + 1);
+      value = analogRead(pin);
+    } else
+    {
+      /* Assume digital pin if not analog pin while 
+       * ignoring non-numerical characters */
+      pin = atoi_safe(args);
+      value = digitalRead(pin);
+    }
     
     Serial.print(F("Pin ")); Serial.print(pin);
     Serial.print(F(" value: ")); Serial.println(value);
@@ -635,6 +649,7 @@ void executeCommand(char* line)
     
     if (strcmp(pinStr, "vixa") == 0) 
     {
+      /* Creates a LED sequential light up effect for the number of LEds specified */
       count = atoi_safe(action);
       if (count <= 0) count = 10;
       addDmesg("LED disco mode activated");
@@ -659,6 +674,7 @@ void executeCommand(char* line)
       pin = atoi_safe(pinStr);
       if (strcmp(action, "on") == 0) 
       {
+        /* Switches the Specified Digital Pin ON */
         pinMode(pin, OUTPUT);
         digitalWrite(pin, HIGH);
         snprintf(buf, sizeof(buf), "GPIO %d ON", pin);
@@ -667,6 +683,7 @@ void executeCommand(char* line)
       }
       else if (strcmp(action, "off") == 0) 
       {
+        /* Switches the Specified Digital Pin OFF */
         pinMode(pin, OUTPUT);
         digitalWrite(pin, LOW);
         snprintf(buf, sizeof(buf), "GPIO %d OFF", pin);
@@ -675,6 +692,7 @@ void executeCommand(char* line)
       }
       else if (strcmp(action, "toggle") == 0) 
       {
+        /* Toggles the Specified Digital Pin */
         pinMode(pin, OUTPUT);
         digitalWrite(pin, !digitalRead(pin));
         snprintf(buf, sizeof(buf), "GPIO %d toggled", pin);
@@ -688,8 +706,11 @@ void executeCommand(char* line)
     int empty = 1, j;
     for (j = 0; j < MAX_FILES; j++) 
     {
+      /* Iteratively search for every file in the fs to see if the parentDir member
+       * of the fs element is same as the 'currentPath' */
       if (fs[j].active && strcmp(fs[j].parentDir, currentPath) == 0) 
       {
+        /* print out if the fs element matches the criterion */
         Serial.print(fs[j].name);
         if (fs[j].isDirectory) Serial.print(F("/"));
         Serial.print(F("  "));
@@ -701,25 +722,34 @@ void executeCommand(char* line)
   }
   else if (strcmp(cmd, "mkdir") == 0 || strcmp(cmd, "touch") == 0) 
   {
-    int foundSlot = -1, j;
+    int foundSlot = -1; 
+    int j;
+    
+    /* check for an empty slot in the file system */
     for (j = 0; j < MAX_FILES; j++) 
     { 
-      if (!fs[j].active) { foundSlot = j; break; } 
+      if (!fs[j].active) 
+      { 
+        foundSlot = j; 
+        break; 
+      } 
     }
+
+    /* Enter this only if no space is found in the fs */
     if (foundSlot == -1) 
     {
       Serial.println(F("No space."));
-      return;
+    } else {
+      /* either make a directory or a file with the specified args */
+      strncpy(fs[foundSlot].name, args, NAME_LEN - 1);
+      fs[foundSlot].name[NAME_LEN - 1] = '\0';
+      strncpy(fs[foundSlot].parentDir, currentPath, PATH_LEN - 1);
+      fs[foundSlot].parentDir[PATH_LEN - 1] = '\0';
+      fs[foundSlot].isDirectory = (strcmp(cmd, "mkdir") == 0);
+      fs[foundSlot].content[0] = '\0';
+      fs[foundSlot].active = 1;
+      Serial.println(F("OK."));  
     }
-    
-    strncpy(fs[foundSlot].name, args, NAME_LEN - 1);
-    fs[foundSlot].name[NAME_LEN - 1] = '\0';
-    strncpy(fs[foundSlot].parentDir, currentPath, PATH_LEN - 1);
-    fs[foundSlot].parentDir[PATH_LEN - 1] = '\0';
-    fs[foundSlot].isDirectory = (strcmp(cmd, "mkdir") == 0);
-    fs[foundSlot].content[0] = '\0';
-    fs[foundSlot].active = 1;
-    Serial.println(F("OK."));
   }
   else if (strcmp(cmd, "cd") == 0) 
   {
@@ -747,16 +777,21 @@ void executeCommand(char* line)
           break;
         }
       }
+
+      /* inform the user that the mentioned directory doesn't exist at the specified path */
       if (!found) Serial.println(F("No dir."));
     }
   }
   else if (strcmp(cmd, "pwd") == 0) 
   {
+    /* printout the current working directory */
     Serial.println(currentPath);
   }
   else if (strcmp(cmd, "echo") == 0) 
   {
     int arrow = indexOf(args, " > ");
+    
+    /* ensure that the arrow redirector is found in the args */
     if (arrow != -1) 
     {
       char text[40] = "";
@@ -791,25 +826,34 @@ void executeCommand(char* line)
           break;
         }
       }
+
+      /* inform the user that no file was found which as specified */
       if (!found) Serial.println(F("File not found."));
     }
     else 
     {
+      /* simply print out the args if there is no redirector */
       Serial.println(args);
     }
   }
   else if (strcmp(cmd, "cat") == 0) 
   {
-    int j, found = 0;
+    int found = 0;
+    int j; 
+
+    /* Fine the specified file by the user in the fs */
     for (j = 0; j < MAX_FILES; j++) 
     {
       if (fs[j].active && !fs[j].isDirectory && strcmp(args, fs[j].name) == 0 && strcmp(fs[j].parentDir, currentPath) == 0) 
       {
+        /* dump the file content and mark the file as found */
         Serial.println(fs[j].content);
         found = 1;
         break;
       }
     }
+
+    /* Inform the user that the file wasn't found */
     if (!found) Serial.println(F("File not found."));
   }
   else if (strcmp(cmd, "info") == 0) 
@@ -830,7 +874,10 @@ void executeCommand(char* line)
   }
   else if (strcmp(cmd, "rm") == 0) 
   {
-    int j, found = 0;
+    int found = 0;
+    int j; 
+
+    /* Find the specified file/directory */
     for (j = 0; j < MAX_FILES; j++) 
     {
       if (fs[j].active && strcmp(args, fs[j].name) == 0 && strcmp(fs[j].parentDir, currentPath) == 0) 
@@ -863,8 +910,10 @@ void executeCommand(char* line)
   }
   else if (strcmp(cmd, "dmesg") == 0) 
   {
-    Serial.println(F("=== KERNEL MESSAGES ==="));
     int j;
+    Serial.println(F("=== KERNEL MESSAGES ==="));
+    
+    /* Iteratively printout the dmesgs stored in the system */
     for (j = 0; j < DMESG_LINES; j++) 
     {
       if (dmesg[j].message[0] != '\0') 
@@ -878,6 +927,7 @@ void executeCommand(char* line)
   }
   else if (strcmp(cmd, "uptime") == 0) 
   {
+    /* Print out the time the system has been running */
     unsigned long s = millis()/1000;
     unsigned long h = s / 3600;
     unsigned long m = (s % 3600) / 60;
@@ -890,16 +940,19 @@ void executeCommand(char* line)
   }
   else if (strcmp(cmd, "df") == 0 || strcmp(cmd, "free") == 0) 
   {
+    /* Print out the size of free memory available in RAM */
     Serial.print(F("Free RAM: "));
     Serial.print(freeMemory());
     Serial.println(F(" bytes"));
   }
   else if (strcmp(cmd, "whoami") == 0) 
   {
+    /* No support for user privilege currently */
     Serial.println(F("root"));
   }
   else if (strcmp(cmd, "uname") == 0) 
   {
+    /* Print out Kernel & Memory information */
     Serial.println(F("KernelUNO v1.0"));
     Serial.print(F("Kernel: Arduino "));
     Serial.println(F("AVR"));
@@ -919,32 +972,42 @@ void executeCommand(char* line)
   else if (strcmp(cmd, "clear") == 0) 
   {
     int j;
+    
+    /* Print newline the number of rows visible on the serial console */
     for(j = 0; j < 30; j++) Serial.println();
   }
   else if (strcmp(cmd, "sh") == 0) 
   {
+    int j, found = 0;
+
+    /* args should be passed appropriately */
     if (args[0] == '\0') 
     {
       Serial.println(F("Usage: sh [script]"));
       return;
     }
-    int j, found = 0;
+
+    /* Find the script file and then call the utility function to run it */
     for (j = 0; j < MAX_FILES; j++) 
     {
       if (fs[j].active && !fs[j].isDirectory &&
           strcmp(args, fs[j].name) == 0 &&
           strcmp(fs[j].parentDir, currentPath) == 0) 
       {
+        /* Run the Script once found */
         found = 1;
         addDmesg("sh: running script");
         runScript(fs[j].content);
         break;
       }
     }
+
+    /* Inform the user that the script was not found */
     if (!found) Serial.println(F("Script not found."));
   }
   else if (strcmp(cmd, "help") == 0) 
   {
+    /* Print out all the commands the Kernel has to offer */
     Serial.println(F("Commands: ls, cd, pwd, mkdir, touch, cat, echo, rm, info"));
     Serial.println(F("          pinmode, write, read, gpio, sh"));
     Serial.println(F("          uptime, uname, dmesg, df, free, whoami, clear, reboot"));
@@ -953,6 +1016,7 @@ void executeCommand(char* line)
   }
   else 
   {
+    /* Command typed in by the user was not found */
     Serial.println(F("Unknown command."));
   }
 }

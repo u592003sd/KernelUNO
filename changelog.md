@@ -4,3 +4,4 @@
 - Replaced index hard coding at various locations. e.g. used 'CONTENT_LEN' instead of '32', etc.
 - Added default 'else' branch to 'pinmode','write' command.
 - Added analogWrite functionality to 'write' command.
+- Added analogRead functionality to 'read' command.
