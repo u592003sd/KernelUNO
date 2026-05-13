@@ -5,3 +5,4 @@
 - Added default 'else' branch to 'pinmode','write' command.
 - Added analogWrite functionality to 'write' command.
 - Added analogRead functionality to 'read' command.
+- Added 'fade' action to 'gpio' command.

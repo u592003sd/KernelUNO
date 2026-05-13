@@ -636,7 +636,7 @@ void executeCommand(char* line)
     sp = indexOf(args, " ");
     if (sp == -1) 
     { 
-      Serial.println(F("Usage: gpio [pin] [on/off] OR gpio vixa [count]"));
+      Serial.println(F("Usage: gpio [pin] [on/off] OR gpio vixa [count] OR gpio fade [PWM pin]"));
       return; 
     }
     char pinStr[8] = "";
@@ -649,7 +649,7 @@ void executeCommand(char* line)
     
     if (strcmp(pinStr, "vixa") == 0) 
     {
-      /* Creates a LED sequential light up effect for the number of LEds specified */
+      /* Creates a LED sequential light up effect for the number of LEDs specified */
       count = atoi_safe(action);
       if (count <= 0) count = 10;
       addDmesg("LED disco mode activated");
@@ -668,6 +668,40 @@ void executeCommand(char* line)
       }
       Serial.println(F("Disco finished!"));
       addDmesg("Disco complete");
+    }
+    else if (strcmp(pinStr, "fade") == 0) 
+    {
+      int pwmPin;
+
+      /* Capture the PWM pin specified by the user and 
+       * see if it exists in the PWM pin array. */
+      pwmPin = atoi_safe(action);
+      if (intFind(pwmPin, pinsPwm, NUM_PWM_PINS) != -1)
+      {
+        addDmesg("Fade mode activated");
+        Serial.println(F("FADE MODE!"));
+        
+        /* Fade Up */
+        for (int i = 0; i <= 255; i+=5)
+        {
+          analogWrite(pwmPin, i);
+          delay(20);
+        }
+
+        /* Fade Down */
+        for (int i = 255; i >= 0; i-=5)
+        {
+          analogWrite(pwmPin, i);
+          delay(20);
+        }
+
+        Serial.println(F("Fade finished!"));
+        addDmesg("Fade complete");
+      } else {
+        /* Return Error to the User */
+        Serial.println(F("Incorrect pin provided. Pin doesn't support PWM "));
+        addDmesg("Fade Failed.");        
+      }
     } 
     else 
     {
